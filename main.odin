@@ -161,6 +161,22 @@ set_image_pixel :: proc(img: Image, idx: [2]int, value: []f32) {
 }
 
 load_image :: proc(path: string) -> (Image, bool) {
+	normalize_pixels :: proc(normalized: []f32, pixels: [][$N]$T) {
+		for pixel, i in pixels {
+			for channel, j in normalize_pixel(pixel) {
+				normalized[i * N + j] = channel
+			}
+		}
+	}
+
+	normalize_pixel :: proc "contextless" (pixel: [$N]$T) -> [N]f32 {
+		normalized: [N]f32
+		for x, i in pixel {
+			normalized[i] = f32(x) / f32(max(T))
+		}
+		return normalized
+	}
+
 	img, err := image.load(path)
 	if err != nil {
 		log.errorf("Failed to load image: %v", err)
@@ -204,22 +220,6 @@ load_image :: proc(path: string) -> (Image, bool) {
 	return result, true
 }
 
-normalize_pixels :: proc(normalized: []f32, pixels: [][$N]$T) {
-	for pixel, i in pixels {
-		for channel, j in normalize_pixel(pixel) {
-			normalized[i * N + j] = channel
-		}
-	}
-}
-
-normalize_pixel :: proc "contextless" (pixel: [$N]$T) -> [N]f32 {
-	normalized: [N]f32
-	for x, i in pixel {
-		normalized[i] = f32(x) / f32(max(T))
-	}
-	return normalized
-}
-
 remove_seam_from_image :: proc(img: ^Image, seam: []int) {
 	for col, row in seam {
 		row_offset := row * img.stride * img.channels
@@ -240,20 +240,26 @@ remove_seam_from_matrix :: proc(mat: ^Matrix, seam: []int) {
 	mat.width -= 1
 }
 
-find_matrix_min_max :: proc(mat: Matrix) -> (f32, f32) {
-	min_element := max(f32)
-	max_element := min(f32)
-	for row in 0 ..< mat.height {
-		for col in 0 ..< mat.width {
-			element := get_matrix_element(mat, {col, row})
-			min_element = min(min_element, element)
-			max_element = max(max_element, element)
-		}
-	}
-	return min_element, max_element
-}
-
 convert_image_to_grayscale :: proc(dst: Matrix, src: Image) {
+	convert_pixel_to_grayscale :: proc "contextless" (pixel: [3]f32) -> f32 {
+		linearized: [3]f32
+		for x, i in pixel {
+			if x <= 0.04045 {
+				linearized[i] = x / 12.92
+			} else {
+				linearized[i] = math.pow((x + 0.055) / 1.055, 2.4)
+			}
+		}
+		luminance := 0.2126 * linearized.r + 0.7152 * linearized.g + 0.0722 * linearized.b
+		lightness: f32
+		if luminance <= 216.0 / 24389.0 {
+			lightness = luminance * (24389.0 / 27.0)
+		} else {
+			lightness = math.pow(luminance, 1.0 / 3.0) * 116.0 - 16.0
+		}
+		return lightness / 100.0
+	}
+
 	assert(dst.width == src.width)
 	assert(dst.height == src.height)
 	switch src.channels {
@@ -270,25 +276,6 @@ convert_image_to_grayscale :: proc(dst: Matrix, src: Image) {
 	case:
 		unreachable()
 	}
-}
-
-convert_pixel_to_grayscale :: proc "contextless" (pixel: [3]f32) -> f32 {
-	linearized: [3]f32
-	for x, i in pixel {
-		if x <= 0.04045 {
-			linearized[i] = x / 12.92
-		} else {
-			linearized[i] = math.pow((x + 0.055) / 1.055, 2.4)
-		}
-	}
-	luminance := 0.2126 * linearized.r + 0.7152 * linearized.g + 0.0722 * linearized.b
-	lightness: f32
-	if luminance <= 216.0 / 24389.0 {
-		lightness = luminance * (24389.0 / 27.0)
-	} else {
-		lightness = math.pow(luminance, 1.0 / 3.0) * 116.0 - 16.0
-	}
-	return lightness / 100.0
 }
 
 calculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix) {
@@ -354,6 +341,7 @@ find_minimum_seam :: proc(seam: []int, energies: Matrix) -> []int {
 		}
 		return min_col
 	}
+
 	assert(len(seam) == energies.height)
 	row := energies.height - 1
 	col := find_row_minimum(energies, row, 0, energies.width - 1)
@@ -367,6 +355,19 @@ find_minimum_seam :: proc(seam: []int, energies: Matrix) -> []int {
 }
 
 save_matrix_to_png :: proc(mat: Matrix, name: string) -> bool {
+	find_matrix_min_max :: proc(mat: Matrix) -> (f32, f32) {
+		min_element := max(f32)
+		max_element := min(f32)
+		for row in 0 ..< mat.height {
+			for col in 0 ..< mat.width {
+				element := get_matrix_element(mat, {col, row})
+				min_element = min(min_element, element)
+				max_element = max(max_element, element)
+			}
+		}
+		return min_element, max_element
+	}
+
 	buf := make([]u8, mat.width * mat.height)
 	defer delete(buf)
 

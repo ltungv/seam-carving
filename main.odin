@@ -119,12 +119,12 @@ create_matrix :: proc(width, height: int) -> Matrix {
 	return mat
 }
 
-get_matrix_element :: proc(mat: Matrix, idx: [2]int) -> f32 {
+get_matrix_element :: proc "contextless" (mat: Matrix, idx: [2]int) -> f32 {
 	element_idx := idx.y * mat.stride + idx.x
 	return mat.elements[element_idx]
 }
 
-set_matrix_element :: proc(mat: Matrix, idx: [2]int, value: f32) {
+set_matrix_element :: proc "contextless" (mat: Matrix, idx: [2]int, value: f32) {
 	element_idx := idx.y * mat.stride + idx.x
 	mat.elements[element_idx] = value
 }
@@ -147,34 +147,33 @@ create_image :: proc(width, height, channels: int) -> Image {
 	return img
 }
 
-get_image_pixel :: proc(img: Image, idx: [2]int) -> []f32 {
+get_image_pixel :: proc "contextless" (img: Image, idx: [2]int) -> []f32 {
 	beg := idx.y * img.stride * img.channels + idx.x * img.channels
 	end := beg + img.channels
 	return img.pixels[beg:end]
 }
 
-set_image_pixel :: proc(img: Image, idx: [2]int, value: []f32) {
-	assert(len(value) == img.channels)
+set_image_pixel :: proc "contextless" (img: Image, idx: [2]int, value: []f32) {
 	beg := idx.y * img.stride * img.channels + idx.x * img.channels
 	end := beg + img.channels
 	copy(img.pixels[beg:end], value[:img.channels])
 }
 
 load_image :: proc(path: string) -> (Image, bool) {
-	normalize_pixels :: proc(normalized: []f32, pixels: [][$N]$T) {
-		for pixel, i in pixels {
-			for channel, j in normalize_pixel(pixel) {
-				normalized[i * N + j] = channel
-			}
-		}
-	}
-
 	normalize_pixel :: proc "contextless" (pixel: [$N]$T) -> [N]f32 {
 		normalized: [N]f32
 		for x, i in pixel {
 			normalized[i] = f32(x) / f32(max(T))
 		}
 		return normalized
+	}
+
+	normalize_pixels :: proc "contextless" (normalized: []f32, pixels: [][$N]$T) {
+		for pixel, i in pixels {
+			for channel, j in normalize_pixel(pixel) {
+				normalized[i * N + j] = channel
+			}
+		}
 	}
 
 	img, err := image.load(path)
@@ -220,7 +219,7 @@ load_image :: proc(path: string) -> (Image, bool) {
 	return result, true
 }
 
-remove_seam_from_image :: proc(img: ^Image, seam: []int) {
+remove_seam_from_image :: proc "contextless" (img: ^Image, seam: []int) {
 	for col, row in seam {
 		row_offset := row * img.stride * img.channels
 		row_last_idx := row_offset + img.channels * img.width
@@ -230,7 +229,7 @@ remove_seam_from_image :: proc(img: ^Image, seam: []int) {
 	img.width -= 1
 }
 
-remove_seam_from_matrix :: proc(mat: ^Matrix, seam: []int) {
+remove_seam_from_matrix :: proc "contextless" (mat: ^Matrix, seam: []int) {
 	for col, row in seam {
 		row_offset := row * mat.stride
 		row_last_idx := row_offset + mat.width
@@ -328,7 +327,7 @@ calculate_seam_energies :: proc(energies: Matrix, gradients: Matrix) {
 }
 
 find_minimum_seam :: proc(seam: []int, energies: Matrix) -> []int {
-	find_row_minimum :: proc(energies: Matrix, row: int, col_beg: int, col_end: int) -> int {
+	find_row_minimum :: proc "contextless" (energies: Matrix, row: int, col_beg: int, col_end: int) -> int {
 		min_col: int
 		min_energy := max(f32)
 		for col in col_beg ..= col_end {
@@ -355,7 +354,7 @@ find_minimum_seam :: proc(seam: []int, energies: Matrix) -> []int {
 }
 
 save_matrix_to_png :: proc(mat: Matrix, name: string) -> bool {
-	find_matrix_min_max :: proc(mat: Matrix) -> (f32, f32) {
+	find_matrix_min_max :: proc "contextless" (mat: Matrix) -> (f32, f32) {
 		min_element := max(f32)
 		max_element := min(f32)
 		for row in 0 ..< mat.height {

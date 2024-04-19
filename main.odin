@@ -8,7 +8,15 @@ import "core:math"
 import "core:mem"
 import "core:os"
 import "core:slice"
+import "core:strconv"
+import "core:strings"
 import stbi "vendor:stb/image"
+
+Args :: struct {
+	input:  string,
+	output: string,
+	width:  int,
+}
 
 Matrix :: struct {
 	width:    int,
@@ -60,15 +68,54 @@ main :: proc() {
 		context.temp_allocator = mem.tracking_allocator(&temp_track)
 	}
 
-	if !exec() do os.exit(1)
+	args, is_valid_args := parse_args()
+	if !is_valid_args {
+		log.error("Invalid arguments")
+		os.exit(1)
+	}
+	if !exec(args) {
+		log.error("Failed to resize the image")
+		os.exit(1)
+	}
 }
 
-exec :: proc() -> bool {
+parse_args :: proc() -> (Args, bool) {
+	args: Args
+	args_idx := 1
+	for args_idx < len(os.args) {
+		switch os.args[args_idx] {
+		case "-i":
+			args_idx += 1
+			if args_idx >= len(os.args) do return {}, false
+			args.input = os.args[args_idx]
+		case "-o":
+			args_idx += 1
+			if args_idx >= len(os.args) do return {}, false
+			args.output = os.args[args_idx]
+		case "-w":
+			args_idx += 1
+			if args_idx >= len(os.args) do return {}, false
+			width, ok := strconv.parse_int(os.args[args_idx])
+			if !ok do return {}, false
+			args.width = width
+		}
+		args_idx += 1
+	}
+	is_valid_args := len(args.input) > 0 && len(args.output) > 0 && args.width > 0
+	return args, is_valid_args
+}
+
+exec :: proc(args: Args) -> bool {
 	defer free_all(context.temp_allocator)
 
-	img, ok := load_image("broadway_tower.png")
+	img, ok := load_image(args.input)
 	if !ok do return false
 	defer destroy_image(&img)
+
+	if img.width < args.width {
+		log.error("Invalid resize width")
+		return false
+	}
 
 	grayscale := create_matrix(img.width, img.height)
 	defer destroy_matrix(&grayscale)
@@ -84,7 +131,8 @@ exec :: proc() -> bool {
 
 	convert_image_to_grayscale(grayscale, img)
 	calculate_image_gradients(gradients, grayscale)
-	for iter in 0 ..< 1000 {
+	iterations := img.width - args.width
+	for iter in 0 ..< iterations {
 		log.infof("Iteration %v", iter)
 		calculate_seam_energies(energies, gradients)
 		find_minimum_seam(seam, energies)
@@ -93,14 +141,9 @@ exec :: proc() -> bool {
 		remove_seam_from_matrix(&gradients, seam)
 		recalculate_image_gradients_with_seam(gradients, grayscale, seam)
 		energies.width -= 1
-		if (iter + 1) % 200 == 0 {
-			name := fmt.aprintf("broadway_tower_carved_%v", iter + 1)
-			defer delete(name)
-			if !save_image_to_png(img, name) do return false
-		}
 	}
 
-	return true
+	return save_image_to_png(img, args.output)
 }
 
 destroy_matrix :: proc(mat: ^Matrix) {
@@ -179,18 +222,18 @@ load_image :: proc(path: string) -> (Image, bool) {
 
 	img, err := image.load(path)
 	if err != nil {
-		log.errorf("Failed to load image: %v", err)
+		log.errorf("Failed to load the image: %v", err)
 		return {}, false
 	}
 	defer image.destroy(img)
 
 	if !image.is_valid_image(img) {
-		log.error("Image format is invalid")
+		log.error("Invalid image format")
 		return {}, false
 	}
 
 	if !image.alpha_drop_if_present(img, {.alpha_premultiply, .blend_background}) {
-		log.error("Failed to drop alpha channel")
+		log.error("Failed to drop the alpha channel")
 		return {}, false
 	}
 
@@ -367,7 +410,7 @@ find_minimum_seam :: proc(seam: []int, energies: Matrix) -> []int {
 	return seam
 }
 
-save_matrix_to_png :: proc(mat: Matrix, name: string) -> bool {
+save_matrix_to_png :: proc(mat: Matrix, fname: string) -> bool {
 	find_matrix_min_max :: proc "contextless" (mat: Matrix) -> (f32, f32) {
 		min_element := max(f32)
 		max_element := min(f32)
@@ -394,14 +437,14 @@ save_matrix_to_png :: proc(mat: Matrix, name: string) -> bool {
 		}
 	}
 
-	fname := fmt.caprintf("%s.png", name)
-	defer delete(fname)
+	fname_cstring := strings.clone_to_cstring(fname)
+	defer delete(fname_cstring)
 
-	write_err := stbi.write_png(fname, i32(mat.width), i32(mat.height), 1, slice.as_ptr(buf), i32(mat.width))
+	write_err := stbi.write_png(fname_cstring, i32(mat.width), i32(mat.height), 1, slice.as_ptr(buf), i32(mat.width))
 	return write_err != 0
 }
 
-save_image_to_png :: proc(img: Image, name: string) -> bool {
+save_image_to_png :: proc(img: Image, fname: string) -> bool {
 	buf := make([]u8, img.width * img.height * img.channels)
 	defer delete(buf)
 
@@ -414,11 +457,11 @@ save_image_to_png :: proc(img: Image, name: string) -> bool {
 		}
 	}
 
-	fname := fmt.caprintf("%s.png", name)
-	defer delete(fname)
+	fname_cstring := strings.clone_to_cstring(fname)
+	defer delete(fname_cstring)
 
 	write_err := stbi.write_png(
-		fname,
+		fname_cstring,
 		i32(img.width),
 		i32(img.height),
 		i32(img.channels),

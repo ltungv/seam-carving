@@ -83,14 +83,15 @@ exec :: proc() -> bool {
 	defer delete(seam)
 
 	convert_image_to_grayscale(grayscale, img)
+	calculate_image_gradients(gradients, grayscale)
 	for iter in 0 ..< 1000 {
 		log.infof("Iteration %v", iter)
-		calculate_image_gradients(gradients, grayscale)
 		calculate_seam_energies(energies, gradients)
 		find_minimum_seam(seam, energies)
 		remove_seam_from_image(&img, seam)
 		remove_seam_from_matrix(&grayscale, seam)
-		gradients.width -= 1
+		remove_seam_from_matrix(&gradients, seam)
+		recalculate_image_gradients_with_seam(gradients, grayscale, seam)
 		energies.width -= 1
 		if (iter + 1) % 200 == 0 {
 			name := fmt.aprintf("broadway_tower_carved_%v", iter + 1)
@@ -277,30 +278,43 @@ convert_image_to_grayscale :: proc(dst: Matrix, src: Image) {
 	}
 }
 
-calculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix) {
+calculate_pixel_gradients :: proc(gradients: Matrix, grayscale: Matrix, index: [2]int) {
 	assert(gradients.width == grayscale.width)
 	assert(gradients.height == grayscale.height)
 	hfilter := [?]f32{1, 2, 1, 0, 0, 0, -1, -2, -1}
 	vfilter := [?]f32{1, 0, -1, 2, 0, -2, 1, 0, -1}
+	hgradient: f32 = 0
+	vgradient: f32 = 0
+	for filter_row in 0 ..< 3 {
+		pixel_row := index[1] + filter_row - 1
+		if pixel_row < 0 || pixel_row >= grayscale.height do continue
+		for filter_col in 0 ..< 3 {
+			pixel_col := index[0] + filter_col - 1
+			if pixel_col < 0 || pixel_col >= grayscale.width do continue
+			gray_level := get_matrix_element(grayscale, {pixel_col, pixel_row})
+			filter_idx := filter_row * 3 + filter_col
+			hgradient += gray_level * hfilter[filter_idx]
+			vgradient += gray_level * vfilter[filter_idx]
+		}
+	}
+	gradient := math.sqrt(hgradient * hgradient + vgradient * vgradient)
+	set_matrix_element(gradients, index, gradient)
+}
+
+calculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix) {
 	for row in 0 ..< grayscale.height {
 		for col in 0 ..< grayscale.width {
-			hgradient: f32 = 0
-			vgradient: f32 = 0
-			for filter_row in 0 ..< 3 {
-				for filter_col in 0 ..< 3 {
-					pixel_row := row + filter_row - 1
-					pixel_col := col + filter_col - 1
-					if pixel_row < 0 || pixel_row >= grayscale.height || pixel_col < 0 || pixel_col >= grayscale.width {
-						continue
-					}
-					gray_level := get_matrix_element(grayscale, {pixel_col, pixel_row})
-					filter_idx := filter_row * 3 + filter_col
-					hgradient += gray_level * hfilter[filter_idx]
-					vgradient += gray_level * vfilter[filter_idx]
-				}
-			}
-			gradient := math.sqrt(hgradient * hgradient + vgradient * vgradient)
-			set_matrix_element(gradients, {col, row}, gradient)
+			calculate_pixel_gradients(gradients, grayscale, {col, row})
+		}
+	}
+}
+
+recalculate_image_gradients_with_seam :: proc(gradients: Matrix, grayscale: Matrix, seam: []int) {
+	assert(len(seam) == gradients.height)
+	for col, row in seam {
+		for nearby_col in col - 2 ..< col + 2 {
+			if nearby_col < 0 || nearby_col >= gradients.width do continue
+			calculate_pixel_gradients(gradients, grayscale, {nearby_col, row})
 		}
 	}
 }

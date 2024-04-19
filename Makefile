@@ -20,6 +20,10 @@ test: prepare $(SOURCE_FILES)
 	@mkdir -p $(TARGET_DIR)/$@
 	odin test $(SOURCE_DIR) $(BUILD_FLAGS) -out:$(TARGET_DIR)/$@/$(NAME)
 
+build: prepare $(SOURCE_FILES)
+	@mkdir -p $(TARGET_DIR)/$@
+	odin build $(SOURCE_DIR) $(BUILD_FLAGS) -out:$(TARGET_DIR)/$@/$(NAME)
+
 check:
 	odin check $(SOURCE_DIR) $(CHECK_FLAGS)
 

@@ -1,3 +1,6 @@
 target/
 *.log
 *.png
+
+!the_persistence_of_memory.png
+!the_persistence_of_memory_carved.png

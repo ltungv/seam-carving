@@ -4,13 +4,15 @@ NAME := seam-carving
 SOURCE_DIR := .
 TARGET_DIR := target
 
-CHECK_FLAGS = -strict-style -vet-semicolon -vet-style
+CHECK_FLAGS = -strict-style -vet-semicolon
 ifeq ($(debug), 1)
 	CHECK_FLAGS := $(CHECK_FLAGS) -debug
 	BUILD_FLAGS := $(CHECK_FLAGS)
 else
 	BUILD_FLAGS := $(CHECK_FLAGS) -o:speed
 endif
+
+default: build
 
 run: prepare $(SOURCE_FILES)
 	@mkdir -p $(TARGET_DIR)/$@

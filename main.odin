@@ -136,10 +136,8 @@ exec :: proc(args: Args) -> bool {
 		log.infof("Iteration %v", iter)
 		calculate_seam_energies(energies, gradients)
 		find_minimum_seam(seam, energies)
-		remove_seam_from_image(&img, seam)
-		remove_seam_from_matrix(&grayscale, seam)
-		remove_seam_from_matrix(&gradients, seam)
-		recalculate_image_gradients_with_seam(gradients, grayscale, seam)
+		remove_seam(seam, &img, &grayscale, &gradients)
+		calculate_image_gradients_with_seam(gradients, grayscale, seam)
 		energies.width -= 1
 	}
 
@@ -263,24 +261,20 @@ load_image :: proc(path: string) -> (Image, bool) {
 	return result, true
 }
 
-remove_seam_from_image :: proc "contextless" (img: ^Image, seam: []int) {
+remove_seam :: proc "contextless" (seam: []int, img: ^Image, gray: ^Matrix, grad: ^Matrix) {
 	for col, row in seam {
-		row_offset := row * img.stride * img.channels
-		row_last_idx := row_offset + img.channels * img.width
-		row_curr_idx := row_offset + img.channels * col
+		row_offset_1d := row * img.stride
+		row_curr_idx_1d := row_offset_1d + col
+		row_last_idx_1d := row_offset_1d + img.width
+		row_curr_idx := row_curr_idx_1d * img.channels
+		row_last_idx := row_last_idx_1d * img.channels
+		copy(gray.elements[row_curr_idx_1d:row_last_idx_1d - 1], gray.elements[row_curr_idx_1d + 1:row_last_idx_1d])
+		copy(grad.elements[row_curr_idx_1d:row_last_idx_1d - 1], grad.elements[row_curr_idx_1d + 1:row_last_idx_1d])
 		copy(img.pixels[row_curr_idx:row_last_idx - img.channels], img.pixels[row_curr_idx + img.channels:row_last_idx])
 	}
+	gray.width -= 1
+	grad.width -= 1
 	img.width -= 1
-}
-
-remove_seam_from_matrix :: proc "contextless" (mat: ^Matrix, seam: []int) {
-	for col, row in seam {
-		row_offset := row * mat.stride
-		row_last_idx := row_offset + mat.width
-		row_curr_idx := row_offset + col
-		copy(mat.elements[row_curr_idx:row_last_idx - 1], mat.elements[row_curr_idx + 1:row_last_idx])
-	}
-	mat.width -= 1
 }
 
 convert_image_to_grayscale :: proc(dst: Matrix, src: Image) {
@@ -352,7 +346,7 @@ calculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix) {
 	}
 }
 
-recalculate_image_gradients_with_seam :: proc(gradients: Matrix, grayscale: Matrix, seam: []int) {
+calculate_image_gradients_with_seam :: proc(gradients: Matrix, grayscale: Matrix, seam: []int) {
 	assert(len(seam) == gradients.height)
 	for col, row in seam {
 		for nearby_col in col - 2 ..< col + 2 {

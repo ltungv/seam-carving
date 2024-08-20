@@ -135,10 +135,8 @@ exec :: proc(args: Args) -> bool {
 	for iter in 0 ..< iterations {
 		log.infof("Iteration %v", iter)
 		calculate_seam_energies(energies, gradients)
-		find_minimum_seam(seam, energies)
-		remove_seam(seam, &img, &grayscale, &gradients)
+		remove_minimum_seam(seam, &img, &grayscale, &gradients, &energies)
 		calculate_image_gradients_with_seam(gradients, grayscale, seam)
-		energies.width -= 1
 	}
 
 	return save_image_to_png(img, args.output)
@@ -261,22 +259,6 @@ load_image :: proc(path: string) -> (Image, bool) {
 	return result, true
 }
 
-remove_seam :: proc "contextless" (seam: []int, img: ^Image, gray: ^Matrix, grad: ^Matrix) {
-	for col, row in seam {
-		row_offset_1d := row * img.stride
-		row_curr_idx_1d := row_offset_1d + col
-		row_last_idx_1d := row_offset_1d + img.width
-		row_curr_idx := row_curr_idx_1d * img.channels
-		row_last_idx := row_last_idx_1d * img.channels
-		copy(gray.elements[row_curr_idx_1d:row_last_idx_1d - 1], gray.elements[row_curr_idx_1d + 1:row_last_idx_1d])
-		copy(grad.elements[row_curr_idx_1d:row_last_idx_1d - 1], grad.elements[row_curr_idx_1d + 1:row_last_idx_1d])
-		copy(img.pixels[row_curr_idx:row_last_idx - img.channels], img.pixels[row_curr_idx + img.channels:row_last_idx])
-	}
-	gray.width -= 1
-	grad.width -= 1
-	img.width -= 1
-}
-
 convert_image_to_grayscale :: proc(dst: Matrix, src: Image) {
 	convert_pixel_to_grayscale :: proc "contextless" (pixel: [3]f32) -> f32 {
 		linearized: [3]f32
@@ -377,31 +359,63 @@ calculate_seam_energies :: proc(energies: Matrix, gradients: Matrix) {
 	}
 }
 
-find_minimum_seam :: proc(seam: []int, energies: Matrix) -> []int {
-	find_row_minimum :: proc "contextless" (energies: Matrix, row: int, col_beg: int, col_end: int) -> int {
+remove_minimum_seam :: proc(seam: []int, img: ^Image, gray: ^Matrix, grad: ^Matrix, energies: ^Matrix) {
+	remove_row_minimum :: proc "contextless" (
+		img: ^Image,
+		gray: ^Matrix,
+		grad: ^Matrix,
+		energies: Matrix,
+		row: int,
+		col_beg: int,
+		col_end: int,
+	) -> int {
 		min_col: int
 		min_energy := max(f32)
 		for col in col_beg ..= col_end {
-			if col < 0 || col >= energies.width do continue
+			if col < 0 || col >= img.width do continue
 			energy := get_matrix_element(energies, {col, row})
 			if energy < min_energy {
 				min_col = col
 				min_energy = energy
 			}
 		}
+		row_offset := row * img.stride
+		row_curr_idx := row_offset + min_col
+		row_last_idx := row_offset + img.width
+		img_row_curr_idx := row_curr_idx * img.channels
+		img_row_last_idx := row_last_idx * img.channels
+		copy(gray.elements[row_curr_idx:row_last_idx - 1], gray.elements[row_curr_idx + 1:row_last_idx])
+		copy(grad.elements[row_curr_idx:row_last_idx - 1], grad.elements[row_curr_idx + 1:row_last_idx])
+		copy(
+			img.pixels[img_row_curr_idx:img_row_last_idx - img.channels],
+			img.pixels[img_row_curr_idx + img.channels:img_row_last_idx],
+		)
 		return min_col
 	}
 
-	assert(len(seam) == energies.height)
-	row := energies.height - 1
-	col := find_row_minimum(energies, row, 0, energies.width - 1)
+	assert(img.width == gray.width)
+	assert(img.width == grad.width)
+	assert(img.width == energies.width)
+	assert(img.height == len(seam))
+	assert(img.height == gray.height)
+	assert(img.height == grad.height)
+	assert(img.height == energies.height)
+	assert(img.stride == gray.stride)
+	assert(img.stride == grad.stride)
+	assert(img.stride == energies.stride)
+
+	row := img.height - 1
+	col := remove_row_minimum(img, gray, grad, energies^, row, 0, img.width - 1)
 	seam[row] = col
 	for row > 0 {
 		row -= 1
-		col = find_row_minimum(energies, row, col - 1, col + 1)
+		col = remove_row_minimum(img, gray, grad, energies^, row, col - 1, col + 1)
 		seam[row] = col
 	}
-	return seam
+	energies.width -= 1
+	gray.width -= 1
+	grad.width -= 1
+	img.width -= 1
 }
 
 save_matrix_to_png :: proc(mat: Matrix, fname: string) -> bool {

@@ -131,8 +131,7 @@ exec :: proc(args: Args) -> bool {
 
 	convert_image_to_grayscale(grayscale, img)
 	calculate_image_gradients(gradients, grayscale)
-	iterations := img.width - args.width
-	for iter in 0 ..< iterations {
+	for iter in 0 ..< img.width - args.width {
 		log.infof("Iteration %v", iter)
 		calculate_seam_energies(energies, gradients)
 		remove_minimum_seam(seam, &img, &grayscale, &gradients, &energies)

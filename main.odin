@@ -40,7 +40,7 @@ main :: proc() {
 	context.logger = logger
 
 	when ODIN_DEBUG {
-		tracking_allocator_cleanup :: proc(track: ^mem.Tracking_Allocator) {
+		tracking_allocator_cleanup :: proc "contextless" (track: ^mem.Tracking_Allocator) {
 			if len(track.allocation_map) > 0 {
 				log.errorf("=== %v allocations not freed: ===", len(track.allocation_map))
 				for _, entry in track.allocation_map {
@@ -136,7 +136,7 @@ exec :: proc(args: Args) -> bool {
 		log.infof("Iteration %v", iter)
 		calculate_seam_energies(energies, gradients)
 		remove_minimum_seam(seam, &img, &grayscale, &gradients, &energies)
-		calculate_image_gradients_with_seam(gradients, grayscale, seam)
+		recalculate_image_gradients(gradients, grayscale, seam)
 	}
 
 	return save_image_to_png(img, args.output)
@@ -297,9 +297,7 @@ convert_image_to_grayscale :: proc(dst: Matrix, src: Image) {
 	}
 }
 
-calculate_pixel_gradients :: proc(gradients: Matrix, grayscale: Matrix, index: [2]int) {
-	assert(gradients.width == grayscale.width)
-	assert(gradients.height == grayscale.height)
+calculate_pixel_gradients :: proc "contextless" (gradients: Matrix, grayscale: Matrix, index: [2]int) {
 	hfilter := [?]f32{1, 2, 1, 0, 0, 0, -1, -2, -1}
 	vfilter := [?]f32{1, 0, -1, 2, 0, -2, 1, 0, -1}
 	hgradient: f32 = 0
@@ -321,6 +319,8 @@ calculate_pixel_gradients :: proc(gradients: Matrix, grayscale: Matrix, index: [
 }
 
 calculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix) {
+	assert(gradients.width == grayscale.width)
+	assert(gradients.height == grayscale.height)
 	for row in 0 ..< grayscale.height {
 		for col in 0 ..< grayscale.width {
 			calculate_pixel_gradients(gradients, grayscale, {col, row})
@@ -328,8 +328,10 @@ calculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix) {
 	}
 }
 
-calculate_image_gradients_with_seam :: proc(gradients: Matrix, grayscale: Matrix, seam: []int) {
-	assert(len(seam) == gradients.height)
+recalculate_image_gradients :: proc(gradients: Matrix, grayscale: Matrix, seam: []int) {
+	assert(gradients.width == grayscale.width)
+	assert(gradients.height == grayscale.height)
+	assert(gradients.height == len(seam))
 	for col, row in seam {
 		for nearby_col in col - 2 ..< col + 2 {
 			if nearby_col < 0 || nearby_col >= gradients.width do continue
@@ -396,13 +398,10 @@ remove_minimum_seam :: proc(seam: []int, img: ^Image, gray: ^Matrix, grad: ^Matr
 	assert(img.width == gray.width)
 	assert(img.width == grad.width)
 	assert(img.width == energies.width)
-	assert(img.height == len(seam))
 	assert(img.height == gray.height)
 	assert(img.height == grad.height)
 	assert(img.height == energies.height)
-	assert(img.stride == gray.stride)
-	assert(img.stride == grad.stride)
-	assert(img.stride == energies.stride)
+	assert(img.height == len(seam))
 
 	row := img.height - 1
 	col := remove_row_minimum(img, gray, grad, energies^, row, 0, img.width - 1)
